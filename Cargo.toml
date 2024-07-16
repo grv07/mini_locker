@@ -1,0 +1,10 @@
+[package]
+name = "mini_locker"
+version = "0.1.0"
+authors = ["Gaurav Tyagi"]
+edition = "2018"
+
+[dependencies]
+ansi_term = "0.12.1"
+zellij-tile = "0.40.1"
+chrono = "0.4.0"
