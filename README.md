@@ -14,6 +14,18 @@ More about Zellij plugins: [Zellij Documentation][docs]
 ## Install
 `./install.sh` will create awasm in relaese mode and move the target wasn to `your_config_path/plugins`.
 
+
+## Keybinding
+```
+shared_except "locked" {
+    bind "Ctrl y" {
+        LaunchOrFocusPlugin "file:~/.config/zellij/plugins/mini_locker.wasm" {
+            floating true; move_to_focused_tab true;
+        }
+    }
+}
+```
+
 ## Otherwise
 1. Build the project: `cargo build`
 2. Load it inside a running Zellij session: `zellij action start-or-reload-plugin file:target/wasm32-wasi/debug/mini_locker.wasm`
