@@ -7,6 +7,14 @@ More about Zellij plugins: [Zellij Documentation][docs]
 [zellij]: https://github.com/zellij-org/zellij
 [docs]: https://zellij.dev/documentation/plugins.html
 
+
+## Usage
+j: Move the selection up
+k: Move the selection down
+L: Lock the selected pane/tab
+N: Normal the selected pane/tab
+Enter: Move focus to the selected item
+
 ## Development
 
 *Note*: you will need to have `wasm32-wasi` added to rust as a target to build the plugin. This can be done with `rustup target add wasm32-wasi`.
