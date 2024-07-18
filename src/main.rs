@@ -46,8 +46,8 @@ impl ModeState {
         }
     }
 
-    fn get_pane_mode(&mut self, pos: usize, id: u32) -> InputMode {
-        let pane_store = self.store.get_mut(&pos);
+    fn get_pane_mode(&self, pos: &usize, id: u32) -> InputMode {
+        let pane_store = self.store.get(pos);
 
         // If TabState is there
         if let Some((_, pane_store)) = pane_store {
@@ -57,7 +57,7 @@ impl ModeState {
         }
     }
 
-    fn get_tab_mode(&self, pos: usize) -> InputMode {
+    fn get_tab_mode(&self, pos: &usize) -> InputMode {
         let default = (InputMode::Normal, HashMap::new());
         let (mode, _) = self.store.get(&pos).unwrap_or(&default);
 
@@ -71,8 +71,10 @@ struct State {
     // set_mode_to: Option<InputMode>,
     mode_state: ModeState,
     panes_manifest: PaneManifest,
-    selected_pane: usize,
-    selected_pane_id: u32,
+    active_item: usize,
+    items_count: usize,
+    selected_ids: (usize, Option<u32>),
+    // selected_pane_id: u32,
     userspace_configuration: BTreeMap<String, String>,
 }
 
@@ -81,6 +83,30 @@ impl State {
         match mode {
             InputMode::Locked => "L",
             _ => "N",
+        }
+    }
+
+    fn print_tab_item(&mut self, pos: &usize, m: &str) {
+        let tab_title = format!("Tab #{} M: {m}", pos + 1);
+        if self.items_count == self.active_item {
+            self.selected_ids = (*pos, None);
+            let tab_title = color_bold(GREEN, &tab_title);
+            println!("{}", tab_title);
+        } else {
+            let tab_title = color_bold(CYAN, &tab_title);
+            println!("{}", tab_title);
+        }
+    }
+
+    fn print_pane_item(&mut self, pos: &usize, pane: &PaneInfo, m: &str) {
+        if self.items_count == self.active_item {
+            self.selected_ids = (*pos, Some(pane.id));
+            let pane_title = color_bold(ORANGE, &pane.title);
+            println!("  {} M: {}", pane_title, m);
+        } else {
+            let pane_title = color_bold(CYAN, &pane.title);
+
+            println!("  {}", pane_title);
         }
     }
 
@@ -146,54 +172,66 @@ impl ZellijPlugin for State {
                 let tab_info = tab_info.iter().find(|t| t.active);
                 if let Some(tab) = tab_info {
                     self.active_tab = tab.position;
-                    should_render = true;
+
+                    let mode = self.mode_state.get_tab_mode(&self.active_tab);
+                    switch_to_input_mode(&mode);
                 }
+
+                should_render = true;
             }
 
             Event::PaneUpdate(pane_info) => {
                 self.panes_manifest = pane_info;
 
                 if let Some(p_id) = self.get_focused_pane_id() {
-                    let mode = self.mode_state.get_pane_mode(self.active_tab, p_id);
+                    let mode = self.mode_state.get_pane_mode(&self.active_tab, p_id);
 
                     switch_to_input_mode(&mode);
-                    should_render = true;
                 }
+                should_render = true;
             }
 
             Event::Key(Key::Char('j')) => {
-                self.selected_pane = (self.selected_pane + 1) % self.get_active_tab_panes_len();
+                self.active_item = (self.active_item + 1) % self.items_count;
                 should_render = true;
             }
 
             Event::Key(Key::Char('k')) => {
-                self.selected_pane = (self.selected_pane + (self.get_active_tab_panes_len() - 1))
-                    % self.get_active_tab_panes_len();
+                self.active_item = (self.active_item + (self.items_count - 1)) % self.items_count;
                 should_render = true;
             }
 
             Event::Key(Key::Char('L')) => {
-                // self.set_mode_to = Some(InputMode::Locked);
-                self.mode_state.set_pane_mode(
-                    self.active_tab,
-                    self.selected_pane_id,
-                    InputMode::Locked,
-                );
+                let (pos, id) = self.selected_ids;
+
+                if let Some(id) = id {
+                    self.mode_state.set_pane_mode(pos, id, InputMode::Locked);
+                } else {
+                    self.mode_state.set_tab_mode(pos, InputMode::Locked);
+                }
+
                 should_render = true;
             }
 
             Event::Key(Key::Char('N')) => {
-                // self.set_mode_to = Some(InputMode::Normal);
-                self.mode_state.set_pane_mode(
-                    self.active_tab,
-                    self.selected_pane_id,
-                    InputMode::Normal,
-                );
+                let (pos, id) = self.selected_ids;
+
+                if let Some(id) = id {
+                    self.mode_state.set_pane_mode(pos, id, InputMode::Normal);
+                } else {
+                    self.mode_state.set_tab_mode(pos, InputMode::Normal);
+                }
+
                 should_render = true;
             }
 
             Event::Key(Key::Char('\n')) => {
-                focus_terminal_pane(self.selected_pane_id, true);
+                let (pos, id) = self.selected_ids;
+                if let Some(id) = id {
+                    focus_terminal_pane(id, true);
+                } else {
+                    go_to_tab(pos as u32);
+                }
                 should_render = true;
             }
             _ => (),
@@ -203,37 +241,37 @@ impl ZellijPlugin for State {
     }
 
     fn render(&mut self, _rows: usize, _cols: usize) {
-        for (i, pane) in self
-            .panes_manifest
-            .panes
-            .get(&self.active_tab)
-            .unwrap_or(&vec![])
-            .iter()
-            .enumerate()
-        {
-            if pane.is_plugin {
-                continue;
+        self.items_count = 0;
+
+        let panes = self.panes_manifest.panes.clone();
+        //render the current active tab
+        if let Some((pos, panes)) = panes.get_key_value(&self.active_tab) {
+            let m = Self::to_mode_str(self.mode_state.get_tab_mode(pos));
+            self.print_tab_item(pos, m);
+
+            for pane in panes.iter().filter(|p| !p.is_plugin && !p.is_floating) {
+                self.items_count += 1;
+                let m = Self::to_mode_str(self.mode_state.get_pane_mode(pos, pane.id));
+                self.print_pane_item(pos, pane, m);
             }
-
-            if i == self.selected_pane {
-                self.selected_pane_id = pane.id;
-                let pane_title = color_bold(ORANGE, &pane.title);
-
-                println!(
-                    "> {} {} M: {}",
-                    pane_title,
-                    pane.id,
-                    Self::to_mode_str(self.mode_state.get_pane_mode(self.active_tab, pane.id))
-                );
-
-                continue;
-            }
-
-            let pane_title = color_bold(CYAN, &pane.title);
-
-            println!("{}", pane_title);
         }
-        println!("");
+
+        for (pos, panes) in panes.iter() {
+            if pos == &self.active_tab {
+                continue;
+            }
+
+            self.items_count += 1;
+            let m = Self::to_mode_str(self.mode_state.get_tab_mode(pos));
+            self.print_tab_item(pos, m);
+
+            for pane in panes.iter().filter(|p| !p.is_plugin && !p.is_floating) {
+                self.items_count += 1;
+                let m = Self::to_mode_str(self.mode_state.get_pane_mode(&pos, pane.id));
+                self.print_pane_item(&pos, pane, m);
+            }
+            self.items_count += 1;
+        }
     }
 }
 
